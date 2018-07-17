@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 
 # Specify data location
-homedir = "../../data/refseq/archaea/"
+homedir = "../../data/refseq/bacteria/"
 
 for root, dirs, files in os.walk(homedir):
     for file in files:
@@ -35,8 +35,8 @@ for root, dirs, files in os.walk(homedir):
                             df_temp['translation'] = np.nan
                         protein_table = protein_table.append(df_temp, ignore_index=True)
                 print(protein_table.shape)
-                print(file, ' saved to ', root)
-                protein_table.to_csv(root+'/protein_table.csv')
+                print('file saved to ',root,'/',seq_record.id,'.csv')
+                protein_table.to_csv(root+'/'+seq_record.id+'.csv')
 
 
 '''
