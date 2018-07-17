@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 
 # Specify data location
-homedir = "../data/refseq/archaea/"
+homedir = "../../data/refseq/archaea/"
 
 for root, dirs, files in os.walk(homedir):
     for file in files:
