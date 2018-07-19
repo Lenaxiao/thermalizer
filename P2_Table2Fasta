@@ -1,0 +1,3 @@
+#!/bin/bash
+
+awk -F',' '{ printf(">%s\n%s\n", $4, $5); } seq_dic.csv > seq_dic.fasta
