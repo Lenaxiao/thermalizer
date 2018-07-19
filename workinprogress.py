@@ -13,6 +13,7 @@ for root, dirs, files in os.walk(homedir):
         if filepath.endswith(".gbff"):
             file_count = file_count + 1
 
+f = open('seq_dic.csv', 'w')
 current_file = 0
 for root, dirs, files in os.walk(homedir):
     for file in files:
@@ -24,7 +25,7 @@ for root, dirs, files in os.walk(homedir):
                 print("{}% complete ({} of {} files)".format((current_file / file_count) * 100, current_file, file_count))
             for seq_record in SeqIO.parse(filepath, "genbank"):
                 organism = seq_record.annotations["organism"]
-                print(f"organism = {organism}")
+                #print(f"organism = {organism}")
                 #for annotation in seq_record.annotations:
                 #    print(f"{annotation} = {seq_record.annotations[annotation]}")
                 if os.path.isfile(root+'/'+seq_record.id+'.csv'):
