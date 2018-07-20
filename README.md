@@ -5,6 +5,7 @@
 
 Some notes:
 * The environment for this tool can be reconstructed with conda.  It is saved in `environment.yml`
+* Requires python 3.6
 
 Overview of files:
 
