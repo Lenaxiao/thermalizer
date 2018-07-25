@@ -31,13 +31,19 @@ for root, dirs, files in os.walk(homedir):
                 organism = seq_record.annotations["organism"]
                 if "structured_comment" in seq_record.annotations:
                     sc = seq_record.annotations["structured_comment"]
-                    tstring =  process.extractOne("temperature", sc.keys())
-                    if (tstring[1] >= FUZZY_CUTOFF):
-                        t_write = tstring[0]
-                        f.write(str('{},{},{}\n'.format(organism,locus,t_write)))
-                        f.flush()
-                    else:
-                        pass
+                    for keys in sc.keys():
+                    	low_1=keys.lower()
+                    	if low_1 in ['metadata']:
+                            meta = sc[keys]
+                            for keys in meta.keys():
+                            	low_2 = keys.lower()
+                            	if low_2 in ['temperature range','temperature optimum','optimum temperature']:
+                            		t_write = meta[keys]
+                            		f.write(str('{},{},{}\n'.format(organism,locus,t_write)))
+                            		f.flush()
+                            	else:
+                            		pass
+                            		
                 #for annotation in seq_record.annotations:
                 #    print(f"{annotation} = {seq_record.annotations[annotation]}")
 
