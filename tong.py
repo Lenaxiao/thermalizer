@@ -33,8 +33,8 @@ for root, dirs, files in os.walk(homedir):
                     sc = seq_record.annotations["structured_comment"]
                     tstring =  process.extractOne("temperature", sc.keys())
                     if (tstring[1] >= FUZZY_CUTOFF):
-                        t = tstring[0]
-                        f.write(f"{organism},{locus},{t}\n")
+                        t_write = tstring[0]
+                        f.write(str('{},{},{}\n'.format(organism,locus,t_write)))
                         f.flush()
                     else:
                         pass
