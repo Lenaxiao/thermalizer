@@ -19,7 +19,7 @@ for root, dirs, files in os.walk(homedir):
 
 current_file = 0
 f = open("seq_dic.tsv", "w")
-f.write("organism\tlocus\tproduct_id\tproduct\ttranslation\n")
+f.write("organism\tlocus\tproduct\tproduct_id\ttranslation\n")
 print("Mission start:")
 for root, dirs, files in os.walk(homedir):
     for file in files:
