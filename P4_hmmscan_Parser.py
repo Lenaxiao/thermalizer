@@ -28,3 +28,18 @@ f.close()
 stop_time = datetime.now()
 total_time = stop_time - start_time
 print("run time was:", total_time)
+
+###### Merge Two Table ##########
+'''
+import pandas as pd
+import numpy as np
+
+file1 = "seq_dic.tsv"
+file2 = "HitResult.csv"
+
+df1 = pd.read_csv(file1, sep='\t', header=None)
+df2 = pd.read_csv(file2, sep='\t', header=None)
+
+df3 = df1.merge(df2, on='protein_id', how='outer').dropna()
+df3.to_csv("seq_dic_merged.csv", seq='\t')
+'''
