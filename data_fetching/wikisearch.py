@@ -1,5 +1,6 @@
 import urllib.request
 from bs4 import BeautifulSoup
+import re
 #from fuzzywuzzy import process
 
 URL = "https://en.wikipedia.org/wiki/Escherichia_coli"
@@ -11,9 +12,14 @@ soup = BeautifulSoup(page, "html.parser")
 #print(besthit)
 
 text = page.decode('utf-8')
-loc = text.find("°C")
-t = text[loc-8:loc+3]
-t.replace("&#160;", "")
-print(t)
+### loc = text.find("°C")
+### t = text[loc-8:loc+3]
+### print(t.replace("&#160;", ""))
+
+tem = re.findall(r'(\d?\d\d)&#160;°C',text)
+if tem:
+	print(tem)
+else:
+	print('nothing match')
 
 #print(soup.find_all("table"))

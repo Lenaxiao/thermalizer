@@ -16,7 +16,7 @@ for root, dirs, files in os.walk(homedir):
         if filepath.endswith(".gbff"):
             file_count = file_count + 1
 
-f = open('tong.csv', 'w')
+f = open('resistance.csv', 'w')
 current_file = 0
 for root, dirs, files in os.walk(homedir):
     for file in files:
