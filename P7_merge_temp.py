@@ -1,9 +1,12 @@
 import os
 import pandas as pd
 
-df_temp = pd.read_csv('data_fetching/resistance.csv').drop(['organism', 'resistance_boo'], axis=1)
-df_seq = pd.read_csv('seq_dic.tsv', sep='\t')
-df_temp_seq = pd.merge(df_temp, df_seq, on='locus', how='right')
+if not os.path.exists('seq_temp.csv'):
+	df_temp = pd.read_csv('data_fetching/resistance.csv').drop(['organism', 'resistance_boo'], axis=1)
+	df_seq = pd.read_csv('seq_dic.tsv', sep='\t')
+	df_temp_seq = pd.merge(df_temp, df_seq, on='locus', how='inner')
+	df_temp_seq.to_csv('seq_temp.csv')
+df_temp_seq = pd.read_csv('seq_temp.csv')
 print('Data Loaded!')
 print('Start:')
 
