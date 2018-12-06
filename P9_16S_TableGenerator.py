@@ -29,12 +29,16 @@ for root, dirs, files in os.walk(homedir):
             if current_file % 100 == 0:
                 print("{:.2%} complete ({} of {} files)".format(current_file/file_count, current_file, file_count))
             try:
+                done = False
                 for seq_record in SeqIO.parse(filepath, "genbank"):
                     organism = seq_record.annotations["organism"]
                     for feature in seq_record.features:
-                        if feature.type == 'rRNA':
-                            #and feature.qualifier['product'][0] == '16S ribosomal RNA':
+                        if feature.type == 'rRNA' and feature.qualifiers['product'][0] == '16S ribosomal RNA':
                             f.write(f"{organism}\t{seq_record.id}\t{feature.qualifiers['product'][0] if 'product' in feature.qualifiers else np.nan}\t{feature.qualifiers['protein_id'][0] if 'protein_id' in feature.qualifiers else np.nan}\t{feature.qualifiers['translation'][0] if 'translation' in feature.qualifiers else np.nan}\n")
+                            done = True
+                            break
+                    if done is True:
+                        break
                             # commented out the line below to speed up code
                             # f.flush() 
             except AttributeError:
