@@ -34,7 +34,7 @@ for root, dirs, files in os.walk(homedir):
                     organism = seq_record.annotations["organism"]
                     for feature in seq_record.features:
                         if feature.type == 'rRNA' and feature.qualifiers['product'][0] == '16S ribosomal RNA':
-                            f.write(f"{organism}\t{seq_record.id}\t{feature.qualifiers['product'][0] if 'product' in feature.qualifiers else np.nan}\t{feature.seq}\n")
+                            f.write(f"{organism}\t{seq_record.id}\t{feature.qualifiers['product'][0] if 'product' in feature.qualifiers else np.nan}\t{feature.extract(seq_record.seq)}\n")
                             done = True
                             break
                     if done is True:
