@@ -11,7 +11,7 @@ import tensorflow as tf
 from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 from tensorflow.contrib import layers, rnn
-# plt.switch_backend('agg')
+plt.switch_backend('agg')
 
 
 # In[2]:
@@ -29,7 +29,6 @@ output_text = df["thermal_seq"].tolist()
 
 
 # plot the sequence length
-get_ipython().run_line_magic('matplotlib', 'inline')
 encode_lens = [len(seq) for seq in input_text]
 decode_lens = [len(seq) for seq in output_text]
 plt.subplots(figsize = (8, 5), dpi=500)
@@ -39,7 +38,7 @@ plt.xlim(0, 2000)
 plt.xlabel('Sequence Length')
 plt.ylabel('Probability')
 plt.legend(loc='upper right')
-plt.show()
+plt.savefig("length.png", dpi=300)
 
 
 # In[4]:
@@ -197,7 +196,6 @@ def get_a_lstm(num_units):
 # In[16]:
 
 
-############################## Build Model ################################
 # encoding layer
 def encoding_layer(inputs, encode_token, em_size, num_layers, num_units, drop_val):
     
@@ -231,52 +229,82 @@ def encoding_layer(inputs, encode_token, em_size, num_layers, num_units, drop_va
 
 # decoding layer (training + inference)
 def decoding_layer(decode_input, output_index, em_size, num_units, num_layers, decode_length,
-                   encode_output, encode_state, att_size, max_decode_len, drop_val):
+                   encode_output, encode_state, att_size, max_decode_len, drop_val, use_attention=True):
     
     # dynamically setup decoder embedding
-    decode_embed = tf.get_variable("decode_embedding", [len(output_index), em_size])
-    decode_embed_input = tf.nn.embedding_lookup(decode_embed, decode_input)
-    
-    
+    decode_embed = tf.get_variable("decode_embedding", 
+                                   initializer=tf.random_uniform([len(output_index), em_size]),
+                                   dtype=tf.float32)
     decode_cell = tf.contrib.rnn.MultiRNNCell([get_a_lstm(num_units) for _ in range(num_layers)])
     #decode_cell = tf.contrib.cudnn_rnn.CudnnLSTM(num_layers, num_units, direction='bidirectional',
     #                                            dropout=drop_val)
     
-    # training and inference share the same structure except for the helper function
-    def decode(helper, use_attention=True, reuse=None):
-        with tf.variable_scope("decode", reuse=reuse):
-            if use_attention:
-                attention_mech = tf.contrib.seq2seq.LuongAttention(num_units, encode_output)
-                attention_cell = tf.contrib.seq2seq.AttentionWrapper(decode_cell,
-                                                                     attention_mech, 
-                                                                     attention_layer_size=att_size)
-                initial_state = decode_cell.zero_state(dtype=tf.float32, batch_size=batch_size)
-            else:
-                initial_state = encode_state
+    initial_state = encode_state
+    if use_attention:
+        attention_mech = tf.contrib.seq2seq.LuongAttention(num_units, encode_output)
+        attention_cell = tf.contrib.seq2seq.AttentionWrapper(decode_cell,
+                                                             attention_mech, 
+                                                             attention_layer_size=att_size)
+        initial_state = decode_cell.zero_state(dtype=tf.float32, batch_size=batch_size)
 
-            # convert dense vector to the encoded one
-            output_layer = tf.layers.Dense(len(output_index))
-            decoder = tf.contrib.seq2seq.BasicDecoder(decode_cell, helper, initial_state, output_layer)
-            outputs, final_state, _ = tf.contrib.seq2seq.dynamic_decode(decoder, impute_finished=True,
-                                                                        maximum_iterations=max_decode_len)
-            return outputs
-
-    # TrainingHelper is used in training process.
-    # It feeds the ground truth at each step, pass embedded input.
-    train_helper = tf.contrib.seq2seq.TrainingHelper(decode_embed_input, decode_length)
-    train_output = decode(train_helper)
+    # convert dense vector to the encoded one
+    output_layer = tf.layers.Dense(len(output_index))
+    
+    train_output = decoding_train(decode_embed, decode_input, decode_length, decode_cell,
+                                      initial_state, output_layer, max_decode_len)
         
-    # GreedyEmbeddingHelper is used in inference process
-    start_tokens = tf.tile(tf.constant([output_index['<s>']], dtype=tf.int32), [batch_size])
-    inference_helper = tf.contrib.seq2seq.GreedyEmbeddingHelper(decode_embed, 
-                                                                start_tokens, 
-                                                                end_token=output_index['</s>'])
-    inference_output = decode(inference_helper, reuse=True)
+    inference_output = decoding_inference(output_index, batch_size, decode_embed, decode_cell,
+                                              initial_state, output_layer, max_decode_len)
     
     return train_output, inference_output
 
 
 # In[18]:
+
+
+# decode training part
+def decoding_train(decode_embed, decode_input, decode_length, decode_cell, initial_state,
+                   output_layer, max_decode_len):
+    
+    decode_embed_input = tf.nn.embedding_lookup(decode_embed, decode_input)
+    
+    # TrainingHelper is used in training process.
+    # It feeds the ground truth at each step, pass embedded input.
+    train_helper = tf.contrib.seq2seq.TrainingHelper(decode_embed_input,
+                                                     decode_length)
+    train_decoder = tf.contrib.seq2seq.BasicDecoder(decode_cell,
+                                                    train_helper,
+                                                    initial_state,
+                                                    output_layer)
+    train_outputs, _, _ = tf.contrib.seq2seq.dynamic_decode(train_decoder,
+                                                            impute_finished=True,
+                                                            maximum_iterations=max_decode_len)
+    return train_outputs
+
+
+# In[19]:
+
+
+# decode inference part
+def decoding_inference(output_index, batch_size, decode_embed, decode_cell, initial_state,
+                       output_layer, max_decode_len):
+    
+    # GreedyEmbeddingHelper is used in inference process
+    start_tokens = tf.tile(tf.constant([output_index['<s>']], dtype=tf.int32), [batch_size])
+    inference_helper = tf.contrib.seq2seq.GreedyEmbeddingHelper(decode_embed, 
+                                                                start_tokens, 
+                                                                end_token=output_index['</s>'])
+    inference_decoder = tf.contrib.seq2seq.BasicDecoder(decode_cell,
+                                                        inference_helper,
+                                                        initial_state,
+                                                        output_layer)
+    inference_outputs, _, _ = tf.contrib.seq2seq.dynamic_decode(inference_decoder,
+                                                                impute_finished=True,
+                                                                maximum_iterations=max_decode_len)
+    return inference_outputs
+
+
+# In[20]:
 
 
 # wrapped model for sequences
@@ -308,7 +336,7 @@ def rnn_model(inputs, targets, encode_token, em_size, num_layers, num_units, out
     return train_loss, train_preds, inference_preds, training_opt
 
 
-# In[19]:
+# In[21]:
 
 
 # cut based on batch_size
@@ -319,7 +347,7 @@ def batch_div(data, batch_size):
     return batched_data
 
 
-# In[20]:
+# In[22]:
 
 
 def pad_length(input_batch, target_batch):
@@ -335,7 +363,7 @@ def pad_length(input_batch, target_batch):
     return decode_len_batch
 
 
-# In[21]:
+# In[23]:
 
 
 ## to be replaced by Bleu later
@@ -343,7 +371,7 @@ def get_accuracy(target, logits):
     return np.mean(np.equal(target, logits))
 
 
-# In[22]:
+# In[24]:
 
 
 test_target = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
@@ -351,7 +379,7 @@ test_logits = np.array([[1, 2, 1], [0, 4, 5], [3, 2, 8]])
 get_accuracy(test_target, test_logits)
 
 
-# In[23]:
+# In[25]:
 
 
 ########################### training process ############################
@@ -417,7 +445,7 @@ def train(sess, train_input, val_input, train_target, val_target, encode_token, 
     return all_loss, all_val_acc, all_train_acc
 
 
-# In[24]:
+# In[26]:
 
 
 # splits into train/test sets
@@ -429,7 +457,7 @@ print("train samples: ", len(train_input))
 print("validation samples: ", len(val_input))
 
 
-# In[25]:
+# In[27]:
 
 
 with tf.Session() as sess:
@@ -448,10 +476,10 @@ with tf.Session() as sess:
     plt.title('Learning Curve')
     plt.xlabel('Global step')
     plt.ylabel('Loss')
-    plt.show()
+    plt.savefig("loss.png", pdi=300)
 
 
-# In[26]:
+# In[28]:
 
 
 plt.scatter(range(epochs), train_acc, label='train accuracy')
@@ -460,7 +488,7 @@ plt.title('Accuracy Curve')
 plt.xlabel('Global step')
 plt.ylabel('Accuracy')
 plt.legend()
-plt.savefig("acc.png", dpi=600)
+plt.savefig("acc.png", dpi=300)
 
 
 # ### Improve:
