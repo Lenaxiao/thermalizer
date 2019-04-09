@@ -1,0 +1,3 @@
+#!/bin/bash
+
+/work/software/hmmer/binaries/hmmscan -E 0.01 -o Pfam.txt --tblout Pfam_table.txt --max --cpu 16 /work/data/Pfam/Pfam-A.hmm seq_dic2.fasta
