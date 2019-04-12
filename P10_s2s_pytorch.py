@@ -6,7 +6,7 @@ from torch import optim
 import torch.nn.functional as F
 import os
 from torch.utils.data import DataLoader, sampler
-from pytorchtools import EarlyStopping, Encoder, Decoder
+from pytorchtools import EarlyStopping, Encoder, Decoder, InferenceDecoder
 
 torch.manual_seed(1)
 
@@ -106,8 +106,8 @@ def train_val_split(input_seq, target_seq, batch_size):
     train_sampler = sampler.SubsetRandomSampler(train_indx)
     val_sampler = sampler.SubsetRandomSampler(val_indx)
     
-    train_loader = DataLoader(data, batch_size=batch_size, sampler=train_sampler)
-    val_loader = DataLoader(data, batch_size=batch_size, sampler=val_sampler)
+    train_loader = DataLoader(data, batch_size=batch_size, sampler=train_sampler, drop_last=True)
+    val_loader = DataLoader(data, batch_size=batch_size, sampler=val_sampler, drop_last=True)
     
     train_batches = batch_inp_out(train_loader)
     val_batches = batch_inp_out(val_loader)
@@ -129,8 +129,50 @@ def loss_func(dec_out, target, mask):
 ########################################################
 #################### Model Traning #####################
 ########################################################
+# calculate loss based on teacher forcing
+def loss_calulation(encoder, decoder, batch, batch_size, teacher_forcing_r):
+    
+    input_t, lengths, max_target_len, target_t, mask_t = batch
+    
+    input_t = input_t.to(device)
+    lengths = lengths.to(device)
+    target_t = target_t.to(device)
+    mask_t = mask_t.to(device)
+    
+    encoder_output, encoder_hidden = encoder(input_t, lengths)
+    decoder_input = torch.LongTensor([[SOS_TOKEN for _ in range(batch_size)]])
+    decoder_input = decoder_input.to(device)
+    # set initial decoder hidden state to the encoder's final state
+    decoder_hidden = encoder_hidden[:decoder.n_layer]
+    
+    loss = 0
+    print_loss = []
+    nTotals = 0
+    if np.random.random() < teacher_forcing_r:
+        for step in range(max_target_len):
+            decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden, encoder_output)
+            # teacher forcing: next input is current target
+            decoder_input = target_t[step].view(1, -1)
+            mask_loss, nTotal = loss_func(decoder_output, target_t[step], mask_t[step])
+            loss += mask_loss
+            print_loss.append(mask_loss.item()*nTotal)
+            nTotals += nTotal
+    else:
+        for step in range(max_target_len):
+            decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden, encoder_output)
+            # non teacher forcing: next input is current decoder output
+            # choose the index of word with highest possibility
+            _, indx = torch.max(decoder_output, dim=1) 
+            decoder_input = torch.LongTensor([[indx[i] for i in range(batch_size)]])
+            decoder_input.to(device)
+            mask_loss, nTotal = loss_func(decoder_output, target_t[step], mask_t[step])
+            loss += mask_loss
+            print_loss.append(mask_loss.item()*nTotal)
+            nTotals += nTotal
+    
+    return print_loss, loss, nTotals
 
-# train for a fixed iterations
+# training process wrap
 def train(input_seq, target_seq, batch_size, epochs, hidden_dim, embedding, encoder, decoder,
           encoder_opt, decoder_opt, teacher_forcing_r, epoch_from, folder, patience=20):
     
@@ -145,6 +187,7 @@ def train(input_seq, target_seq, batch_size, epochs, hidden_dim, embedding, enco
     early_stopping = EarlyStopping(patience=patience)
     
     for epoch in range(epoch_from, epochs):
+
         ############
         # Training #
         ############
@@ -152,47 +195,12 @@ def train(input_seq, target_seq, batch_size, epochs, hidden_dim, embedding, enco
         decoder.train()
         train_loss = []
         for train_batch in train_batches:
-            input_t, lengths, max_target_len, target_t, mask_t = train_batch
             # initialize and move the model to GPU/CPU
             # set training mode
             encoder_opt.zero_grad()
             decoder_opt.zero_grad()
 
-            input_t = input_t.to(device)
-            lengths = lengths.to(device)
-            target_t = target_t.to(device)
-            mask_t = mask_t.to(device)
-
-            encoder_output, encoder_hidden = encoder(input_t, lengths)
-            decoder_input = torch.LongTensor([[SOS_TOKEN for _ in range(batch_size)]])
-            decoder_input = decoder_input.to(device)
-            # set initial decoder hidden state to the encoder's final state
-            decoder_hidden = encoder_hidden[:decoder.n_layer]
-
-            loss = 0
-            print_loss = []
-            nTotals = 0
-            if np.random.random() < teacher_forcing_r:
-                for step in range(max_target_len):
-                    decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden, encoder_output)
-                    # teacher forcing: next input is current target
-                    decoder_input = target_t[step].view(1, -1)
-                    mask_loss, nTotal = loss_func(decoder_output, target_t[step], mask_t[step])
-                    loss += mask_loss
-                    print_loss.append(mask_loss.item()*nTotal)
-                    nTotals += nTotal
-            else:
-                for step in range(max_target_len):
-                    decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden, encoder_output)
-                    # non teacher forcing: next input is current decoder output
-                    # choose the index of word with highest possibility
-                    _, indx = torch.max(decoder_output, dim=1) 
-                    decoder_input = torch.LongTensor([[indx[i] for i in range(batch_size)]])
-                    decoder_input.to(device)
-                    mask_loss, nTotal = loss_func(decoder_output, target_t[step], mask_t[step])
-                    loss += mask_loss
-                    print_loss.append(mask_loss.item()*nTotal)
-                    nTotals += nTotal
+            print_loss, loss, nTotals = loss_calulation(encoder, decoder, train_batch, batch_size, teacher_forcing_r)
 
             loss.backward()
 
@@ -205,6 +213,7 @@ def train(input_seq, target_seq, batch_size, epochs, hidden_dim, embedding, enco
             train_loss.append(sum(print_loss) / nTotals)
         
         print("train_finished!")
+
         ##############
         # validation #
         ##############
@@ -212,44 +221,8 @@ def train(input_seq, target_seq, batch_size, epochs, hidden_dim, embedding, enco
         decoder.eval()
         val_loss = []
         for val_batch in val_batches:
-            input_t, lengths, max_target_len, target_t, mask_t = val_batch
-
-            input_t = input_t.to(device)
-            lengths = lengths.to(device)
-            target_t = target_t.to(device)
-            mask_t = mask_t.to(device)
-
-            encoder_output, encoder_hidden = encoder(input_t, lengths)
-            decoder_input = torch.LongTensor([[SOS_TOKEN for _ in range(batch_size)]])
-            decoder_input = decoder_input.to(device)
-            # set initial decoder hidden state to the encoder's final state
-            decoder_hidden = encoder_hidden[:decoder.n_layer]
-
-            loss = 0
-            print_loss = []
-            nTotals = 0
-            if np.random.random() < teacher_forcing_r:
-                for step in range(max_target_len):
-                    decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden, encoder_output)
-                    # teacher forcing: next input is current target
-                    decoder_input = target_t[step].view(1, -1)
-                    mask_loss, nTotal = loss_func(decoder_output, target_t[step], mask_t[step])
-                    loss += mask_loss
-                    print_loss.append(mask_loss.item()*nTotal)
-                    nTotals += nTotal
-            else:
-                for step in range(max_target_len):
-                    decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden, encoder_output)
-                    # non teacher forcing: next input is current decoder output
-                    # choose the index of word with highest possibility
-                    _, indx = torch.max(decoder_output, dim=1) 
-                    decoder_input = torch.LongTensor([[indx[i] for i in range(batch_size)]])
-                    decoder_input.to(device)
-                    mask_loss, nTotal = loss_func(decoder_output, target_t[step], mask_t[step])
-                    loss += mask_loss
-                    print_loss.append(mask_loss.item()*nTotal)
-                    nTotals += nTotal
-                    
+            print_loss, _, nTotals = loss_calulation(encoder, decoder, val_batch, batch_size, teacher_forcing_r)
+            
             val_loss.append(sum(print_loss) / nTotals)  # loss for batches
 
         avg_train_loss.append(np.average(train_loss))  # loss for epochs
@@ -273,6 +246,86 @@ def train(input_seq, target_seq, batch_size, epochs, hidden_dim, embedding, enco
         
     return avg_train_loss, avg_val_loss
 
+def run(folder, loadMode):
+    if loadMode:
+        checkpoint = torch.load(loadMode)
+        enc_chp = checkpoint["enc"]
+        dec_chp = checkpoint["dec"]
+        enc_opt_chp = checkpoint["enc_opt"]
+        dec_opt_chp = checkpoint["dec_opt"]
+        voc.__dict__ = checkpoint["voc_dict"]
+        embedding_chp = checkpoint["embedding"]
+
+    embedding = nn.Embedding(voc.num_words, hidden_dim)
+    if loadMode:
+        embedding.load_state_dict(embedding_chp)
+
+    encoder = Encoder(hidden_dim, embedding, enc_layer_dim, dropout)
+    decoder = Decoder(attn_method, embedding, hidden_dim, voc.num_words, dec_layer_dim, dropout)
+    if loadMode:
+        encoder.load_state_dict(enc_chp)
+        decoder.load_state_dict(dec_chp)
+
+    encoder = encoder.to(device)
+    decoder = decoder.to(device)
+
+    encoder_opt = optim.Adam(encoder.parameters(), lr=lr)
+    decoder_opt = optim.Adam(decoder.parameters(), lr=lr)
+
+    epoch_from = 0
+    if loadMode:
+        encoder_opt.load_state_dict(enc_opt_chp)
+        decoder_opt.load_state_dict(dec_opt_chp)
+        epoch_from = checkpoint['epoch'] + 1
+
+    train_loss, val_loss = train(input_seq, target_seq, batch_size, epochs, hidden_dim, embedding,
+                                 encoder, decoder, encoder_opt, decoder_opt, teacher_forcing_r,
+                                 epoch_from, folder)
+    
+    with open(os.path.join(folder, 'loss.txt'), 'w') as f:
+        for loss1, loss2 in list(zip(train_loss, val_loss)):
+            f.write("{}\t{}\n".format(loss1, loss2))
+
+def evaluation(inference, voc, test_seq, chop_size):    
+    # word2index
+    mapped_batch = [map_character(voc, test_seq)]
+    lengths = torch.tensor([len(mapped_batch[0])])
+    input_batch = torch.LongTensor(mapped_batch).t()
+    input_batch = input_batch.to(device)
+    lengths = lengths.to(device)
+    preds, probs = inference(input_batch, lengths, chop_size)
+    decoded_words = [voc.index2word[indx.item()] for indx in preds]
+    return decoded_words
+
+def translate(loadMode, rand_indx, chop_size):
+    checkpoint = torch.load(loadMode)
+    enc_chp = checkpoint["enc"]
+    dec_chp = checkpoint["dec"]
+    voc.__dict__ = checkpoint["voc_dict"]
+    embedding_chp = checkpoint["embedding"]
+
+    embedding = nn.Embedding(voc.num_words, hidden_dim)
+    embedding.load_state_dict(embedding_chp)
+
+    encoder = Encoder(hidden_dim, embedding, enc_layer_dim, dropout)
+    decoder = Decoder(attn_method, embedding, hidden_dim, voc.num_words, dec_layer_dim, dropout)
+    encoder.load_state_dict(enc_chp)
+    decoder.load_state_dict(dec_chp)
+
+    encoder = encoder.to(device)
+    decoder = decoder.to(device)
+    
+    encoder.eval()
+    decoder.eval()
+
+    test_seq = input_seq[rand_indx]
+    test_tar = target_seq[rand_indx]
+    inference = InferenceDecoder(encoder, decoder)
+    decoded_words = evaluation(inference, voc, test_seq, chop_size)
+    print("Input: ", test_seq)
+    print("Target: ", test_tar)
+    print("Prediction:", ''.join(decoded_words))
+
 
 ##############################################
 ################# Run Model ##################
@@ -288,65 +341,41 @@ lr = 0.0001
 teacher_forcing_r = 0.5
 batch_size = 128
 epochs = 2000
+chop_size = 500  # keep sentence length <= chop_size
 
-data_file = "protein_seq_sub.csv"
+data_file = "blastp_best_result/protein_seq.csv"
 
 if __name__ == "__main__":
-	df = pd.read_csv(data_file, index_col=0)
-	df.drop_duplicates(inplace=True)
-	print("Trimming sentence from: ", df.shape)
+    df = pd.read_csv(data_file, index_col=0)
+    df.drop_duplicates(inplace=True)
+    print("Trimming sentence from: ", df.shape)
 
-	# chop off the sequence length
-	# keep sentence length <= 500
-	mask = (df["meso_seq"].str.len()<=500)&(df["thermal_seq"].str.len()<=500)
-	df = df.loc[mask].reset_index(drop=True)
-	print("To: ", df.shape)
+    # chop off the sequence length
+    # keep sentence length <= 500
+    mask = (df["meso_seq"].str.len()<=chop_size)&(df["thermal_seq"].str.len()<=chop_size)
+    df = df.loc[mask].reset_index(drop=True)
+    print("To: ", df.shape)
 
-	input_seq = df["meso_seq"].tolist()
-	target_seq = df["thermal_seq"].tolist()
+    input_seq = df["meso_seq"].tolist()
+    target_seq = df["thermal_seq"].tolist()
 
-	voc = BuildVocab()
-	voc.fromCorpus(input_seq + target_seq)
-	print("Word Count: ", len(voc.word2index))
+    voc = BuildVocab()
+    voc.fromCorpus(input_seq + target_seq)
+    print("Word Count: ", len(voc.word2index))
 
-	## training process
-	loadMode = None  #
-	folder = os.path.join("checkpoints", "{}_{}_{}".format(enc_layer_dim, dec_layer_dim, hidden_dim))
+    ####### training process ##########
+    ## training process
+    folder = os.path.join("checkpoints", "{}_{}_{}".format(enc_layer_dim, dec_layer_dim, hidden_dim))
+    loadMode = None
 
-	if not os.path.exists(folder):
-	    os.makedirs(folder)
+    if not os.path.exists(folder):
+        os.makedirs(folder)
 
-	if loadMode:
-	    checkpoint = torch.load(loadMode)
-	    enc_chp = checkpoint["enc"]
-	    dec_chp = checkpoint["dec"]
-	    enc_opt_chp = checkpoint["enc_opt"]
-	    dec_opt_chp = checkpoint["dec_opt"]
-	    voc.__dict__ = checkpoint["voc_dict"]
-	    embedding_chp = checkpoint["embedding"]
-	    
-	embedding = nn.Embedding(voc.num_words, hidden_dim)
-	if loadMode:
-	    embedding.load_state_dict(embedding_chp)
+    run(folder, loadMode)
 
-	encoder = Encoder(hidden_dim, embedding, enc_layer_dim, dropout)
-	decoder = Decoder(attn_method, embedding, hidden_dim, voc.num_words, dec_layer_dim, dropout)
-	if loadMode:
-	    encoder.load_state_dict(enc_chp)
-	    decoder.load_state_dict(dec_chp)
+    ## translation process
+    seq_indx = np.random.choice(range(len(input_seq)))
+    loadMode = os.path.join(folder, "checkpoint.tar")
+    translate(loadMode, seq_indx, chop_size)
 
-	encoder = encoder.to(device)
-	decoder = decoder.to(device)
-
-	encoder_opt = optim.Adam(encoder.parameters(), lr=lr)
-	decoder_opt = optim.Adam(decoder.parameters(), lr=lr)
-
-	epoch_from = 0
-	if loadMode:
-	    encoder_opt.load_state_dict(enc_opt_chp)
-	    decoder_opt.load_state_dict(dec_opt_chp)
-	    epoch_from = checkpoint['epoch'] + 1
-
-	train_loss, val_loss = train(input_seq, target_seq, batch_size, epochs, hidden_dim, embedding, encoder, decoder,
-	                             encoder_opt, decoder_opt, teacher_forcing_r, epoch_from, folder)
 
