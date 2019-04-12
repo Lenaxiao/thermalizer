@@ -246,6 +246,7 @@ def train(input_seq, target_seq, batch_size, epochs, hidden_dim, embedding, enco
         
     return avg_train_loss, avg_val_loss
 
+<<<<<<< HEAD
 def run(folder, loadMode):
     if loadMode:
         checkpoint = torch.load(loadMode)
@@ -287,12 +288,16 @@ def run(folder, loadMode):
             f.write("{}\t{}\n".format(loss1, loss2))
 
 def evaluation(inference, voc, test_seq, chop_size):    
+=======
+def evaluation(inference, voc, test_seq):    
+>>>>>>> 49b5ae196686be07d68fc0def49e94fca8f2e161
     # word2index
     mapped_batch = [map_character(voc, test_seq)]
     lengths = torch.tensor([len(mapped_batch[0])])
     input_batch = torch.LongTensor(mapped_batch).t()
     input_batch = input_batch.to(device)
     lengths = lengths.to(device)
+<<<<<<< HEAD
     preds, probs = inference(input_batch, lengths, chop_size)
     decoded_words = [voc.index2word[indx.item()] for indx in preds]
     return decoded_words
@@ -326,6 +331,11 @@ def translate(loadMode, rand_indx, chop_size):
     print("Target: ", test_tar)
     print("Prediction:", ''.join(decoded_words))
 
+=======
+    preds, probs = inference(input_batch, lengths, 100)
+    decoded_words = [voc.index2word[indx.item()] for indx in preds]
+    return decoded_words
+>>>>>>> 49b5ae196686be07d68fc0def49e94fca8f2e161
 
 ##############################################
 ################# Run Model ##################
@@ -352,7 +362,11 @@ if __name__ == "__main__":
 
     # chop off the sequence length
     # keep sentence length <= 500
+<<<<<<< HEAD
     mask = (df["meso_seq"].str.len()<=chop_size)&(df["thermal_seq"].str.len()<=chop_size)
+=======
+    mask = (df["meso_seq"].str.len()<=500)&(df["thermal_seq"].str.len()<=500)
+>>>>>>> 49b5ae196686be07d68fc0def49e94fca8f2e161
     df = df.loc[mask].reset_index(drop=True)
     print("To: ", df.shape)
 
@@ -364,13 +378,20 @@ if __name__ == "__main__":
     print("Word Count: ", len(voc.word2index))
 
     ####### training process ##########
+<<<<<<< HEAD
     ## training process
     folder = os.path.join("checkpoints", "{}_{}_{}".format(enc_layer_dim, dec_layer_dim, hidden_dim))
     loadMode = None
+=======
+    training_flag = True # Training=True, Inference=False
+    folder = os.path.join("checkpoints", "{}_{}_{}".format(enc_layer_dim, dec_layer_dim, hidden_dim))
+    loadMode = None # os.path.join(folder, "checkpoint.tar")
+>>>>>>> 49b5ae196686be07d68fc0def49e94fca8f2e161
 
     if not os.path.exists(folder):
         os.makedirs(folder)
 
+<<<<<<< HEAD
     run(folder, loadMode)
 
     ## translation process
@@ -378,4 +399,56 @@ if __name__ == "__main__":
     loadMode = os.path.join(folder, "checkpoint.tar")
     translate(loadMode, seq_indx, chop_size)
 
+=======
+    if loadMode:
+        checkpoint = torch.load(loadMode)
+        enc_chp = checkpoint["enc"]
+        dec_chp = checkpoint["dec"]
+        enc_opt_chp = checkpoint["enc_opt"]
+        dec_opt_chp = checkpoint["dec_opt"]
+        voc.__dict__ = checkpoint["voc_dict"]
+        embedding_chp = checkpoint["embedding"]
+        
+    embedding = nn.Embedding(voc.num_words, hidden_dim)
+    if loadMode:
+        embedding.load_state_dict(embedding_chp)
 
+    encoder = Encoder(hidden_dim, embedding, enc_layer_dim, dropout)
+    decoder = Decoder(attn_method, embedding, hidden_dim, voc.num_words, dec_layer_dim, dropout)
+    if loadMode:
+        encoder.load_state_dict(enc_chp)
+        decoder.load_state_dict(dec_chp)
+
+    encoder = encoder.to(device)
+    decoder = decoder.to(device)
+
+    if training_flag:
+        encoder_opt = optim.Adam(encoder.parameters(), lr=lr)
+        decoder_opt = optim.Adam(decoder.parameters(), lr=lr)
+
+        epoch_from = 0
+        if loadMode:
+            encoder_opt.load_state_dict(enc_opt_chp)
+            decoder_opt.load_state_dict(dec_opt_chp)
+            epoch_from = checkpoint['epoch'] + 1
+
+        train_loss, val_loss = train(input_seq, target_seq, batch_size, epochs, hidden_dim, embedding, encoder, decoder,
+                                     encoder_opt, decoder_opt, teacher_forcing_r, epoch_from, folder)
+
+        with open('loss.txt', 'w') as f:
+            for loss1, loss2 in list(zip(train_loss, val_loss)):
+                f.write("{}\t{}\n".format(loss1, loss2))
+                
+    else:
+        encoder.eval()
+        decoder.eval()
+>>>>>>> 49b5ae196686be07d68fc0def49e94fca8f2e161
+
+        rand_indx = np.random.choice(range(len(input_seq)))
+        test_seq = input_seq[rand_indx]
+        test_tar = target_seq[rand_indx]
+        inference = InferenceDecoder(encoder, decoder)
+        decoded_words = evaluation(inference, voc, test_seq)
+        print(test_seq)
+        print(test_tar)
+        print(''.join(decoded_words))
