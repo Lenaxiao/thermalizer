@@ -21,5 +21,6 @@ Overview of files:
 | P7_blastp_njobs.py | Aligns protein sequences from P6 |
 | P8_blastp_best_hit.py | For each thermophilic protein find its best hit among mesophilic proteins. |
 | P9_blastp_seq_pair.py | Appends sequences according to protein ids from P8. |
-| P10_pytorchtools.py | Defines the classes for Encoder, Attention Mechanism, Decoder, EarlyStopping. |
 | P10_s2s_pytorch.py | Defines the modules for data preprocessing and training. |
+| pytorchtools.py | Defines the classes for Encoder, Attention Mechanism, Decoder, EarlyStopping and InferenceDecoder. |
+| [Seq2Seq_in_Pytorch.ipynb](Seq2Seq_in_Pytorch.ipynb) | The NLP Demo for a small sample. |
