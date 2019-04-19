@@ -174,7 +174,8 @@ def loss_calulation(encoder, decoder, batch, batch_size, teacher_forcing_r):
 
 # training process wrap
 def train(input_seq, target_seq, batch_size, epochs, hidden_dim, embedding, encoder, decoder,
-          encoder_opt, decoder_opt, teacher_forcing_r, epoch_from, folder, patience=20):
+          encoder_opt, decoder_opt, teacher_forcing_r, epoch_from, folder, early_stopping_flag,
+          patience=20):
     
     avg_train_loss = []
     avg_val_loss = []
@@ -184,7 +185,8 @@ def train(input_seq, target_seq, batch_size, epochs, hidden_dim, embedding, enco
     print(encoder)
     print(decoder)
     
-    early_stopping = EarlyStopping(patience=patience)
+    if early_stopping_flag:
+        early_stopping = EarlyStopping(patience=patience, verbose=True)
     
     for epoch in range(epoch_from, epochs):
 
@@ -238,15 +240,16 @@ def train(input_seq, target_seq, batch_size, epochs, hidden_dim, embedding, enco
             voc.__dict__,
             embedding.state_dict())
         
-        early_stopping(avg_val_loss[-1], model_states, folder)
-        
-        if early_stopping.early_stop:
-            print('EarlyStopping ...')
-            break
+        if early_stopping_flag:
+            early_stopping(avg_val_loss[-1], model_states, folder)
+
+            if early_stopping.early_stop:
+                print('EarlyStopping ...')
+                break
         
     return avg_train_loss, avg_val_loss
 
-def run(folder, loadMode):
+def run(folder, loadMode, early_stopping_flag):
     if loadMode:
         checkpoint = torch.load(loadMode)
         enc_chp = checkpoint["enc"]
@@ -280,7 +283,7 @@ def run(folder, loadMode):
 
     train_loss, val_loss = train(input_seq, target_seq, batch_size, epochs, hidden_dim, embedding,
                                  encoder, decoder, encoder_opt, decoder_opt, teacher_forcing_r,
-                                 epoch_from, folder)
+                                 epoch_from, folder, early_stopping_flag)
     
     with open(os.path.join(folder, 'loss.txt'), 'w') as f:
         for loss1, loss2 in list(zip(train_loss, val_loss)):
@@ -332,16 +335,16 @@ def translate(loadMode, rand_indx, chop_size):
 ##############################################
 
 # hyperparameters
-hidden_dim = 500
-enc_layer_dim = 3
-dec_layer_dim = 3
+hidden_dim = 400
+enc_layer_dim = 2
+dec_layer_dim = 2
 dropout = 0.1
 attn_method = "dot"
 lr = 0.0001
 teacher_forcing_r = 0.5
-batch_size = 128
+batch_size = 64
 epochs = 2000
-chop_size = 500  # keep sentence length <= chop_size
+chop_size = 100  # keep sentence length <= chop_size
 
 data_file = "blastp_best_result/protein_seq.csv"
 
@@ -351,7 +354,7 @@ if __name__ == "__main__":
     print("Trimming sentence from: ", df.shape)
 
     # chop off the sequence length
-    # keep sentence length <= 500
+    # keep sentence length <= chop_size
     mask = (df["meso_seq"].str.len()<=chop_size)&(df["thermal_seq"].str.len()<=chop_size)
     df = df.loc[mask].reset_index(drop=True)
     print("To: ", df.shape)
@@ -364,14 +367,14 @@ if __name__ == "__main__":
     print("Word Count: ", len(voc.word2index))
 
     ####### training process ##########
-    ## training process
     folder = os.path.join("checkpoints", "{}_{}_{}".format(enc_layer_dim, dec_layer_dim, hidden_dim))
     loadMode = None
+    early_stopping_flag = False
 
     if not os.path.exists(folder):
         os.makedirs(folder)
 
-    run(folder, loadMode)
+    run(folder, loadMode, early_stopping_flag)
 
     ## translation process
     seq_indx = np.random.choice(range(len(input_seq)))
