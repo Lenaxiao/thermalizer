@@ -164,7 +164,7 @@ def loss_calulation(encoder, decoder, batch, batch_size, teacher_forcing_r):
             # choose the index of word with highest possibility
             _, indx = torch.max(decoder_output, dim=1) 
             decoder_input = torch.LongTensor([[indx[i] for i in range(batch_size)]])
-            decoder_input.to(device)
+            decoder_input = decoder_input.to(device)
             mask_loss, nTotal = loss_func(decoder_output, target_t[step], mask_t[step])
             loss += mask_loss
             print_loss.append(mask_loss.item()*nTotal)
@@ -185,8 +185,7 @@ def train(input_seq, target_seq, batch_size, epochs, hidden_dim, embedding, enco
     print(encoder)
     print(decoder)
     
-    if early_stopping_flag:
-        early_stopping = EarlyStopping(patience=patience, verbose=True)
+    early_stopping = EarlyStopping(patience=patience, verbose=True)
     
     for epoch in range(epoch_from, epochs):
 
@@ -240,11 +239,16 @@ def train(input_seq, target_seq, batch_size, epochs, hidden_dim, embedding, enco
             voc.__dict__,
             embedding.state_dict())
         
+        ## set epochs to be None will switch to earlystopping mode
         if early_stopping_flag:
-            early_stopping(avg_val_loss[-1], model_states, folder)
-
+            early_stopping.stop_early(avg_val_loss[-1], model_states, folder)
             if early_stopping.early_stop:
                 print('EarlyStopping ...')
+                break
+        else:
+            early_stopping.stop_until_epochs(avg_val_loss[-1], model_states, folder, epochs)
+            if early_stopping.early_stop:
+                print('Epochs End ...')
                 break
         
     return avg_train_loss, avg_val_loss
@@ -367,7 +371,7 @@ if __name__ == "__main__":
     print("Word Count: ", len(voc.word2index))
 
     ####### training process ##########
-    folder = os.path.join("checkpoints", "{}_{}_{}".format(enc_layer_dim, dec_layer_dim, hidden_dim))
+    folder = os.path.join("checkpoints", "{}_{}_{}_{}".format(enc_layer_dim, dec_layer_dim, hidden_dim, chop_size))
     loadMode = None
     early_stopping_flag = False
 

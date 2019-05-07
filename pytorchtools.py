@@ -21,8 +21,22 @@ class EarlyStopping:
         self.early_stop = False
         self.val_loss_min = np.Inf
 
-    def __call__(self, val_loss, model_states, folder):
+    def stop_until_epochs(self, val_loss, model_states, folder, epochs):
+        score = -val_loss
 
+        if self.best_score is None:
+            self.best_score = score
+            self.save_checkpoint(val_loss, model_states, folder)
+        elif score > self.best_score:
+            self.best_score = score
+            self.save_checkpoint(val_loss, model_states, folder)
+        
+        self.counter += 1
+
+        if self.counter >= epochs:
+            self.early_stop = True
+
+    def stop_early(self, val_loss, model_states, folder):
         score = -val_loss
 
         if self.best_score is None:
