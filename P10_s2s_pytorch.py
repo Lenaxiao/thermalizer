@@ -175,7 +175,7 @@ def loss_calulation(encoder, decoder, batch, batch_size, teacher_forcing_r):
 # training process wrap
 def train(input_seq, target_seq, batch_size, epochs, hidden_dim, embedding, encoder, decoder,
           encoder_opt, decoder_opt, teacher_forcing_r, epoch_from, folder, early_stopping_flag,
-          patience=20):
+          patience=50):
     
     avg_train_loss = []
     avg_val_loss = []
@@ -185,8 +185,7 @@ def train(input_seq, target_seq, batch_size, epochs, hidden_dim, embedding, enco
     print(encoder)
     print(decoder)
     
-    early_stopping = EarlyStopping(patience=patience, verbose=True)
-    
+    early_stopping = EarlyStopping(patience=patience, verbose=False)
     for epoch in range(epoch_from, epochs):
 
         ############
@@ -221,14 +220,19 @@ def train(input_seq, target_seq, batch_size, epochs, hidden_dim, embedding, enco
         encoder.eval()
         decoder.eval()
         val_loss = []
-        for val_batch in val_batches:
-            print_loss, _, nTotals = loss_calulation(encoder, decoder, val_batch, batch_size, teacher_forcing_r)
+        with torch.no_grad():
+            for val_batch in val_batches:
+                print_loss, _, nTotals = loss_calulation(encoder, decoder, val_batch, batch_size, teacher_forcing_r)
             
-            val_loss.append(sum(print_loss) / nTotals)  # loss for batches
+                val_loss.append(sum(print_loss) / nTotals)  # loss for batches
 
-        avg_train_loss.append(np.average(train_loss))  # loss for epochs
-        avg_val_loss.append(np.average(val_loss))
+            avg_train_loss.append(np.average(train_loss))  # loss for epochs
+            avg_val_loss.append(np.average(val_loss))
+        
         print("Epoch: {}; train loss: {:.4}; val loss: {:.4}".format(epoch + 1, avg_train_loss[-1], avg_val_loss[-1]))
+        with open(os.path.join(folder, 'loss.txt'), 'w') as f:
+            for loss1, loss2 in list(zip(avg_train_loss, avg_val_loss)):
+                f.write("{}\t{}\n".format(loss1, loss2))
         
         model_states = (
             epoch,
@@ -250,10 +254,10 @@ def train(input_seq, target_seq, batch_size, epochs, hidden_dim, embedding, enco
             if early_stopping.early_stop:
                 print('Epochs End ...')
                 break
-        
+
     return avg_train_loss, avg_val_loss
 
-def run(folder, loadMode, early_stopping_flag):
+def run(input_seq, target_seq, folder, loadMode, early_stopping_flag):
     if loadMode:
         checkpoint = torch.load(loadMode)
         enc_chp = checkpoint["enc"]
@@ -288,50 +292,6 @@ def run(folder, loadMode, early_stopping_flag):
     train_loss, val_loss = train(input_seq, target_seq, batch_size, epochs, hidden_dim, embedding,
                                  encoder, decoder, encoder_opt, decoder_opt, teacher_forcing_r,
                                  epoch_from, folder, early_stopping_flag)
-    
-    with open(os.path.join(folder, 'loss.txt'), 'w') as f:
-        for loss1, loss2 in list(zip(train_loss, val_loss)):
-            f.write("{}\t{}\n".format(loss1, loss2))
-
-def evaluation(inference, voc, test_seq, chop_size):    
-    # word2index
-    mapped_batch = [map_character(voc, test_seq)]
-    lengths = torch.tensor([len(mapped_batch[0])])
-    input_batch = torch.LongTensor(mapped_batch).t()
-    input_batch = input_batch.to(device)
-    lengths = lengths.to(device)
-    preds, probs = inference(input_batch, lengths, chop_size)
-    decoded_words = [voc.index2word[indx.item()] for indx in preds]
-    return decoded_words
-
-def translate(loadMode, rand_indx, chop_size):
-    checkpoint = torch.load(loadMode)
-    enc_chp = checkpoint["enc"]
-    dec_chp = checkpoint["dec"]
-    voc.__dict__ = checkpoint["voc_dict"]
-    embedding_chp = checkpoint["embedding"]
-
-    embedding = nn.Embedding(voc.num_words, hidden_dim)
-    embedding.load_state_dict(embedding_chp)
-
-    encoder = Encoder(hidden_dim, embedding, enc_layer_dim, dropout)
-    decoder = Decoder(attn_method, embedding, hidden_dim, voc.num_words, dec_layer_dim, dropout)
-    encoder.load_state_dict(enc_chp)
-    decoder.load_state_dict(dec_chp)
-
-    encoder = encoder.to(device)
-    decoder = decoder.to(device)
-    
-    encoder.eval()
-    decoder.eval()
-
-    test_seq = input_seq[rand_indx]
-    test_tar = target_seq[rand_indx]
-    inference = InferenceDecoder(encoder, decoder)
-    decoded_words = evaluation(inference, voc, test_seq, chop_size)
-    print("Input: ", test_seq)
-    print("Target: ", test_tar)
-    print("Prediction:", ''.join(decoded_words))
 
 
 ##############################################
@@ -339,49 +299,63 @@ def translate(loadMode, rand_indx, chop_size):
 ##############################################
 
 # hyperparameters
-hidden_dim = 400
+hidden_dim = 300
 enc_layer_dim = 2
 dec_layer_dim = 2
 dropout = 0.1
-attn_method = "dot"
+attn_method = "concat"
 lr = 0.0001
 teacher_forcing_r = 0.5
-batch_size = 64
-epochs = 2000
-chop_size = 100  # keep sentence length <= chop_size
+batch_size = 256
+epochs = 100
+chop_size = 200  # keep sentence length <= chop_size
 
-data_file = "blastp_best_result/protein_seq.csv"
+data_file = "protein_seq.csv"
+folder = os.path.join("checkpoints", "{}_{}_{}_{}_{}_{}_{}".format(attn_method, batch_size, enc_layer_dim, dropout, lr, hidden_dim, chop_size))
+if not os.path.exists(folder):
+    os.makedirs(folder)
+train_file = os.path.join(folder, "train.txt")
+test_file = os.path.join(folder, "test.txt")
 
 if __name__ == "__main__":
-    df = pd.read_csv(data_file, index_col=0)
-    df.drop_duplicates(inplace=True)
-    print("Trimming sentence from: ", df.shape)
+    if not os.path.exists(train_file):
+        df = pd.read_csv(data_file, index_col=0)
+        df.drop_duplicates(inplace=True)
+        print("Trimming sentence from: ", df.shape)
 
-    # chop off the sequence length
-    # keep sentence length <= chop_size
-    mask = (df["meso_seq"].str.len()<=chop_size)&(df["thermal_seq"].str.len()<=chop_size)
-    df = df.loc[mask].reset_index(drop=True)
-    print("To: ", df.shape)
+        # chop off the sequence length
+        # keep sentence length <= chop_size
+        mask = (df["meso_seq"].str.len()<=chop_size)&(df["thermal_seq"].str.len()<=chop_size)
+        df = df.loc[mask].reset_index(drop=True)
+        print("To: ", df.shape)
 
-    input_seq = df["meso_seq"].tolist()
-    target_seq = df["thermal_seq"].tolist()
+        input_seq = df["meso_seq"].tolist()
+        target_seq = df["thermal_seq"].tolist()
+
+        num_train = len(input_seq)
+        indices = list(range(num_train))
+        np.random.shuffle(indices)
+        split = int(np.floor(0.1* num_train)) # test on 10% of data
+        train_indx, test_indx = indices[split:], indices[:split]
+        
+        with open(train_file, 'w') as f:
+            for i in test_indx:
+                f.write("{},{}\n".format(input_seq[i], target_seq[i]))
+        
+        with open(test_file, 'w') as f:
+            for i in train_indx:
+                f.write("{},{}\n".format(input_seq[i], target_seq[i]))
+    
+    df = pd.read_csv(train_file, sep=",", header=None)
+    train_input_seq = df.iloc[:, :1].values.flatten().tolist()
+    train_target_seq = df.iloc[:, 1:].values.flatten().tolist()
 
     voc = BuildVocab()
-    voc.fromCorpus(input_seq + target_seq)
+    voc.fromCorpus(train_input_seq + train_target_seq)
     print("Word Count: ", len(voc.word2index))
 
     ####### training process ##########
-    folder = os.path.join("checkpoints", "{}_{}_{}_{}".format(enc_layer_dim, dec_layer_dim, hidden_dim, chop_size))
     loadMode = None
     early_stopping_flag = False
-
-    if not os.path.exists(folder):
-        os.makedirs(folder)
-
-    run(folder, loadMode, early_stopping_flag)
-
-    ## translation process
-    seq_indx = np.random.choice(range(len(input_seq)))
-    loadMode = os.path.join(folder, "checkpoint.tar")
-    translate(loadMode, seq_indx, chop_size)
+    run(train_input_seq, train_target_seq, folder, loadMode, early_stopping_flag)
 

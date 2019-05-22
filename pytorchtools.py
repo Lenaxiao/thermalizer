@@ -22,17 +22,8 @@ class EarlyStopping:
         self.val_loss_min = np.Inf
 
     def stop_until_epochs(self, val_loss, model_states, folder, epochs):
-        score = -val_loss
-
-        if self.best_score is None:
-            self.best_score = score
-            self.save_checkpoint(val_loss, model_states, folder)
-        elif score > self.best_score:
-            self.best_score = score
-            self.save_checkpoint(val_loss, model_states, folder)
-        
+        self.save_checkpoint(val_loss, model_states, folder)
         self.counter += 1
-
         if self.counter >= epochs:
             self.early_stop = True
 
@@ -105,6 +96,11 @@ class Attn(torch.nn.Module):
         super(Attn, self).__init__()
         self.method = method
         self.hidden_size = hidden_size
+        if self.method == 'general':
+            self.attn = nn.Linear(self.hidden_size, hidden_size)
+        elif self.method == 'concat':
+            self.attn = nn.Linear(self.hidden_size * 2, hidden_size)
+            self.v = nn.Parameter(torch.FloatTensor(hidden_size))
     
     # current decoder state (ht): (1, batch_size, hidden_size) 
     # encoder output (hs): (max_length, batch_size, hidden_size)
@@ -112,10 +108,26 @@ class Attn(torch.nn.Module):
     def attn_dot(self, ht, hs):
         return torch.sum(ht * hs, dim=2) # sum across hidden_size
     
+    def attn_general(self, ht, hs):
+        energy = self.attn(hs)
+        return torch.sum(ht * energy, dim=2)
+    
+    def attn_concat(self, ht, hs):
+        energy = self.attn(torch.cat((ht.expand(hs.size(0), -1, -1), hs),2)).tanh()
+        return torch.sum(self.v * energy, dim=2)
+    
     # return: (batch_size, 1, max_length)
     def forward(self, ht, hs):
         # (batch_size, max_length)
-        score = self.attn_dot(ht, hs).t()
+        if self.method == 'general':
+            score = self.attn_general(ht, hs)
+        elif self.method == 'concat':
+            score = self.attn_concat(ht, hs)
+        else:
+            score = self.attn_dot(ht, hs)
+        
+        score = score.t()
+        
         # normalize across each row so that the sum of each col in a row will be 1
         # and add one dimension
         return F.softmax(score, dim=1).unsqueeze(1)
@@ -162,28 +174,30 @@ class Decoder(nn.Module):
 
 
 class InferenceDecoder(nn.Module):
-    def __init__(self, encoder, decoder):
+    def __init__(self, encoder, decoder, device):
         super(InferenceDecoder, self).__init__()
         self.encoder = encoder
         self.decoder = decoder
+        self.device = device
     
     def forward(self, input_t, lengths, max_target_len):
-        encoder_output, encoder_hidden = encoder(input_t, lengths)
+        encoder_output, encoder_hidden = self.encoder(input_t, lengths)
         decoder_input = torch.LongTensor([[SOS_TOKEN]])
-        decoder_hidden = encoder_hidden[:decoder.n_layer]
+        decoder_hidden = encoder_hidden[:self.decoder.n_layer]
         
         preds = torch.LongTensor()
         probs = torch.zeros([0])
         
-        decoder_input = decoder_input.to(device)
-        preds = preds.to(device)
-        probs = probs.to(device)
+        decoder_input = decoder_input.to(self.device)
+        preds = preds.to(self.device)
+        probs = probs.to(self.device)
         
         for _ in range(max_target_len):
             decoder_output, decoder_hidden = self.decoder(decoder_input, decoder_hidden, encoder_output)
             prob, indx = torch.max(decoder_output, dim=1)
             # non teacher forcing
             decoder_input = torch.LongTensor([[indx]])
+            decoder_input = decoder_input.to(self.device)
             preds = torch.cat((preds, indx), dim=0)
             probs = torch.cat((probs, prob), dim=0)
             if preds[-1] == EOS_TOKEN:
