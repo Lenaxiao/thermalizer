@@ -17,7 +17,7 @@ plt.switch_backend('agg')
 # In[2]:
 
 
-df = pd.read_csv("protein_seq_sub.csv", index_col=0)
+df = pd.read_csv("protein_seq_small.csv", index_col=0)
 print(df.shape)
 df.drop_duplicates(inplace=True)
 print(df.shape)
@@ -162,7 +162,7 @@ print(sequence_padding(test_input, 4))
 
 
 ################## hyperparameters ###################
-epochs = 10
+epochs = 200
 batch_size = 65
 num_layers = 2
 num_units = 3
@@ -481,7 +481,7 @@ with tf.Session() as sess:
 
 # In[28]:
 
-
+plt.figure(figsize=(20, 10))
 plt.scatter(range(epochs), train_acc, label='train accuracy')
 plt.scatter(range(epochs), val_acc, label='validation accuracy')
 plt.title('Accuracy Curve')

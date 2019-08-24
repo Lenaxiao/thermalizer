@@ -38,4 +38,3 @@ def split_meso_thermal(df, filename):
 
 split_meso_thermal(thermal, "16S_thermophile.fasta")
 split_meso_thermal(meso, "16S_mesophile.fasta")
-

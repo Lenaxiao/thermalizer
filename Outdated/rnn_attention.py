@@ -78,13 +78,11 @@ print("2nd: ", len(conv_input[1]))
 
 # plot the sequence length
 ## considering cutoff later
-get_ipython().run_line_magic('matplotlib', 'inline')
 encode_lens = [len(seq) for seq in conv_input]
-plt.subplots(figsize = (8, 5), dpi = 600)
 n, bins, patches = plt.hist(encode_lens, 30, normed=1, facecolor='blue', alpha=0.5)
 plt.xlabel('Sequence Length')
 plt.ylabel('Probability')
-plt.show()
+plt.savefig('length.png', dpi=600)
 
 
 # In[7]:
@@ -138,8 +136,8 @@ num_units = 3
 em_size = 60
 l_rate = 0.001
 att_size = 5
-#drop_val = 0.5
-save_path="/model_history/model.ckpt"
+drop_val = 0
+save_path="./model.ckpt"
 
 
 # In[11]:
@@ -169,7 +167,7 @@ max_decode_len = tf.reduce_max(decode_length, name='max_dec_len')
 
 ############################## Build Model ################################
 # encoding layer
-def encoding_layer(inputs, encode_token, em_size, num_layers, num_units):
+def encoding_layer(inputs, encode_token, em_size, num_layers, num_units, drop_val):
     
     # encoded input embedding
     #input_embed = tf.contrib.layers.embed_sequence(inputs, vocab_size=encode_token,
@@ -178,15 +176,18 @@ def encoding_layer(inputs, encode_token, em_size, num_layers, num_units):
                                    initializer=tf.random_uniform([encode_token, em_size]),
                                    dtype=tf.float32)
     encode_embed_input = tf.nn.embedding_lookup(encode_embed, inputs)
-    ## setup drop out later
+
     ## setup bidirectional later
-    lstm_cell = tf.contrib.rnn.BasicLSTMCell(num_units)
     #lstm_cell_bw = tf.contrib.rnn.BasicLSTMCell(num_units)
     def get_a_lstm(num_units):
-        return tf.nn.rnn_cell.BasicLSTMCell(num_units)
+        cell = tf.nn.rnn_cell.BasicLSTMCell(num_units)
+        cell = tf.nn.rnn_cell.DropoutWrapper(cell, output_keep_prob=1-drop_val)
+        return cell
     stacked_lstm = tf.contrib.rnn.MultiRNNCell([get_a_lstm(num_units) for _ in range(num_layers)])
     #stacked_lstm_bw = tf.contrib.rnn.MultiRNNCell([lstm_cell_bw] * num_layers)
-    
+#     stacked_lstm = tf.contrib.cudnn_rnn.CudnnLSTM(num_layers, num_units,
+#                                                   direction='bidirectional',
+#                                                   dropout=drop_val)
     encode_output, encode_state = tf.nn.dynamic_rnn(stacked_lstm,
                                                     encode_embed_input,
                                                     dtype=tf.float32)
@@ -198,16 +199,19 @@ def encoding_layer(inputs, encode_token, em_size, num_layers, num_units):
 
 # decoding layer (training + inference)
 def decoding_layer(decode_input, output_index, em_size, num_units, num_layers,
-                   decode_length, encode_output, att_size, max_decode_len):
+                   decode_length, encode_output, att_size, max_decode_len, drop_val):
     
     # decoder input embedding
     decode_embed = tf.get_variable("decode_embedding", [len(output_index), em_size])
     decode_embed_input = tf.nn.embedding_lookup(decode_embed, decode_input)
     
     def get_a_lstm(num_units):
-        return tf.nn.rnn_cell.BasicLSTMCell(num_units)
+        cell = tf.nn.rnn_cell.BasicLSTMCell(num_units)
+        cell = tf.nn.rnn_cell.DropoutWrapper(cell, output_keep_prob=1-drop_val)
+        return cell
     decode_cell = tf.contrib.rnn.MultiRNNCell([get_a_lstm(num_units) for _ in range(num_layers)])
-    
+    #decode_cell = tf.contrib.cudnn_rnn.CudnnLSTM(num_layers, num_units, direction='bidirectional',
+    #                                            dropout=drop_val)
     # TrainingHelper feeds the ground truth at each step, pass embedded input.
     train_helper = tf.contrib.seq2seq.TrainingHelper(decode_embed_input, decode_length)
     
@@ -252,15 +256,16 @@ def decoding_layer(decode_input, output_index, em_size, num_units, num_layers,
 
 # wrapped model for sequences
 def rnn_model(inputs, targets, encode_token, em_size, num_layers, num_units, output_index,
-              batch_size, decode_length, att_size, max_encode_len, l_rate):
+              batch_size, decode_length, att_size, max_encode_len, l_rate, drop_val):
     
     # encoding
-    encode_output, encode_state = encoding_layer(inputs, encode_token,
-                                                 em_size, num_layers, num_units)
+    encode_output, encode_state = encoding_layer(inputs, encode_token, em_size, num_layers,
+                                                 num_units, drop_val)
     # decoding
     train_output, inference_output = decoding_layer(targets, output_index, em_size,
                                                     num_units, num_layers, decode_length,
-                                                    encode_output, att_size, max_encode_len)
+                                                    encode_output, att_size, max_encode_len,
+                                                    drop_val)
     # rnn_output is the output of the decoding cell
     train_logit = tf.identity(train_output.rnn_output, name='logit')
     inference_logit = tf.identity(inference_output.sample_id, name='prediction')
@@ -282,7 +287,7 @@ def rnn_model(inputs, targets, encode_token, em_size, num_layers, num_units, out
 
 
 ########################### training process ############################
-def train(sess, conv_input, conv_output, batch_size, epochs, train_loss, training_opt):
+def train(sess, conv_input, conv_output, batch_size, epochs, train_loss, training_opt, save_path):
     
     sess.run(tf.global_variables_initializer())
     
@@ -314,7 +319,7 @@ def train(sess, conv_input, conv_output, batch_size, epochs, train_loss, trainin
         all_loss.append(epoch_loss)
         ## early stopping tolerance: 25
         
-        if epoch != 0 and epoch % 10 == 0:
+        if epoch != 0 and epoch % 50 == 0:
             print(f"Epoch: {epoch}, Loss: {all_loss[-1]}")
         
         
@@ -340,8 +345,18 @@ with tf.Session() as sess:
     train_loss, training_opt = rnn_model(inputs, targets, encode_token, em_size,
                                          num_layers, num_units, output_index,
                                          batch_size, decode_length, att_size,
-                                         max_decode_len, l_rate)
-    loss = train(sess, conv_input, conv_output, batch_size, epochs, train_loss, training_opt)
+                                         max_decode_len, l_rate, drop_val)
+    loss = train(sess, conv_input, conv_output, batch_size, epochs, train_loss, training_opt, save_path)
+    
+    plt.scatter(range(epochs), loss)
+    plt.title('Learning Curve')
+    plt.xlabel('Global step')
+    plt.ylabel('Loss')
+    plt.savefig('loss.png', dpi=600)
+
+    f = open("loss.txt","w")
+    f.write(loss)
+    f.close()
 
 
 # In[ ]:
@@ -366,12 +381,4 @@ with tf.Session() as sess:
 #                      training_opt, predictions)
 #         cv_loss.append(loss)
 #         result.append(sess.run(predictions, feed_dict={x: val_input, y: val_target}))
-
-
-# In[ ]:
-
-
-for i in range(10):
-    if i != 0 and i % 2 == 10:
-        print(f"Epoch: {epoch}, Loss: {all_loss[-1]}")
 

@@ -85,7 +85,7 @@ decoder_outputs = decoder_dense(decoder_outputs)
 
 model = Model([encoder_inputs, decoder_inputs], decoder_outputs)
 
-model.compile(optimizer='rmsprop', loss='categorical_crossentropy')
+model.compile(optimizer='rmsprop', loss='categorical_crossentropy', metrics=['accuracy'])
 model.fit([encode_input, decode_input], decode_output, batch_size=batch_size, epochs=epochs,
          validation_split=0.2)
 model.save('example.h5')

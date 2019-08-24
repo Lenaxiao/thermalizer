@@ -5,7 +5,7 @@ from Bio import SearchIO
 hmmin="Pfam_table.txt"
 
 f=open("Pfam_table2.csv", "w")
-f.write("product_id\tfamily\n")
+f.write("protein_id\tfamily\n")
 print("processing...")
 
 for qresult in SearchIO.parse(hmmin, 'hmmer3-tab'):
